@@ -149,6 +149,14 @@ struct DisplayControlBackend {
     display: Arc<Mutex<Box<dyn RdpServerDisplay>>>,
 }
 
+// TODO:(uchouT) impl RdpeusbServerBackend, which is exposed at `ironrdp-rdpeusb`. The
+// implementation should act like a bridge just like what `DisplayControlBackend` and
+// `RdpServerDisplay` did: responsibility shift from protocol to application, exposing a new trait
+// 'UsbServer'
+//
+// NOTE:(uchouT) unlike DisplayControl which is client→server only, URBDRC is bidirectional: need a
+// mechanism for the backend to push data back through the DVC (e.g. channel sender or async stream)
+
 impl DisplayControlBackend {
     fn new(display: Arc<Mutex<Box<dyn RdpServerDisplay>>>) -> Self {
         Self { display }
@@ -360,6 +368,8 @@ impl RdpServer {
             let echo_handle = self.echo_handle.clone();
             dvc.with_dynamic_channel(EchoDvcBridge::new(echo_handle))
         };
+
+        // TODO: with_dynamic_channel(RdpeusbServer)
 
         #[cfg(feature = "egfx")]
         let dvc = {
