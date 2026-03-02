@@ -258,6 +258,7 @@ pub enum ServerEvent {
     Echo(EchoServerMessage),
     SetCredentials(Credentials),
     GetLocalAddr(oneshot::Sender<Option<SocketAddr>>),
+    // TODO:(uchouT) usb server event
     #[cfg(feature = "egfx")]
     Egfx(EgfxServerMessage),
 }
@@ -295,6 +296,9 @@ impl RdpServer {
         if let Some(snd) = sound_factory.as_mut() {
             snd.set_sender(ev_sender.clone());
         }
+
+        // TODO:(uchouT) register usb server event sender here
+
         #[cfg(feature = "egfx")]
         if let Some(gfx) = gfx_factory.as_mut() {
             gfx.set_sender(ev_sender.clone());
@@ -650,6 +654,7 @@ impl RdpServer {
                     let data = server_encode_svc_messages(msgs.into(), channel_id, user_channel_id)?;
                     writer.write_all(&data).await?;
                 }
+                // TODO:(uchouT) usb event
                 ServerEvent::Echo(msg) => match msg {
                     EchoServerMessage::SendRequest { payload } => {
                         let Some(drdynvc) = self.get_svc_processor::<dvc::DrdynvcServer>() else {
