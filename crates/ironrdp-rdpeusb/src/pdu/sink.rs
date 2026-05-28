@@ -9,7 +9,7 @@ use alloc::format;
 
 use ironrdp_core::{
     Decode, DecodeOwned as _, DecodeResult, Encode, EncodeResult, ReadCursor, WriteCursor, ensure_fixed_part_size,
-    ensure_size, other_err, unsupported_value_err,
+    ensure_size, invalid_field_err, other_err, unsupported_value_err,
 };
 use ironrdp_pdu::utils::strict_sum;
 use ironrdp_str::multi_sz::MultiSzString;
@@ -210,10 +210,21 @@ impl UsbDeviceCaps {
 
     #[expect(clippy::as_conversions)]
     pub const FIXED_PART_SIZE: usize = Self::CB_SIZE as usize;
+
+    const fn check_device_speed(usb_bus_iface_ver: UsbBusIfaceVer, device_speed: DeviceSpeed) -> Result<(), &'static str> {
+        if matches!(usb_bus_iface_ver, UsbBusIfaceVer::V0) && matches!(device_speed, DeviceSpeed::HighSpeed) {
+            Err("must be 0x00000000 when UsbBusInterfaceVersion is 0x00000000")
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl Encode for UsbDeviceCaps {
     fn encode(&self, dst: &mut WriteCursor<'_>) -> EncodeResult<()> {
+        Self::check_device_speed(self.usb_bus_iface_ver, self.device_speed)
+            .map_err(|reason| invalid_field_err!("USB_DEVICE_CAPABILITIES::DeviceIsHighSpeed", reason))?;
+
         ensure_fixed_part_size!(in: dst);
 
         dst.write_u32(Self::CB_SIZE);
@@ -278,6 +289,8 @@ impl Decode<'_> for UsbDeviceCaps {
             0x1 => DeviceSpeed::HighSpeed,
             value => return Err(unsupported_value_err!("DeviceIsHighSpeed", format!("{value}"))),
         };
+        Self::check_device_speed(usb_bus_iface_ver, device_speed)
+            .map_err(|reason| invalid_field_err!("USB_DEVICE_CAPABILITIES::DeviceIsHighSpeed", reason))?;
         let no_ack_isoch_write_jitter_buf_size = match src.read_u32() {
             0 => NoAckIsochWriteJitterBufSizeInMs::TS_URB_ISOCH_TRANSFER_NOT_SUPPORTED,
             value @ 10..=512 => NoAckIsochWriteJitterBufSizeInMs(value),
