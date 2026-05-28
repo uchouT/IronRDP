@@ -719,6 +719,7 @@ impl TransferInRequest {
         ensure_size!(in: src, size: 4 /* CbTsUrb */);
         let cb_ts_urb = src.read_u32().try_into().map_err(|e| other_err!(source: e))?;
 
+        ensure_size!(in: src, size: cb_ts_urb);
         let ts_urb = TsUrb::decode(&mut ReadCursor::new(src.read_slice(cb_ts_urb)), TransferDirection::In)?;
 
         ensure_size!(in: src, size: 4 /* OutputBufferSize */);
@@ -792,6 +793,7 @@ impl TransferOutRequest {
         let ts_urb = {
             ensure_size!(in: src, size: 4 /* CbTsUrb */);
             let cb_ts_urb = src.read_u32().try_into().map_err(|e| other_err!(source: e))?;
+            ensure_size!(in: src, size: cb_ts_urb);
             let mut src = ReadCursor::new(src.read_slice(cb_ts_urb));
             TsUrb::decode(&mut src, TransferDirection::Out)?
         };
@@ -799,6 +801,7 @@ impl TransferOutRequest {
         ensure_size!(in: src, size: 4 /* OutputBufferSize */);
         let output_buffer_size = src.read_u32().try_into().map_err(|e| other_err!(source: e))?;
         // TODO: limit size
+        ensure_size!(in: src, size: output_buffer_size);
         let output_buffer = src.read_slice(output_buffer_size).to_vec();
 
         Ok(Self {

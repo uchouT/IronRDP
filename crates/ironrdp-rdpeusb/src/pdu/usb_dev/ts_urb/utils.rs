@@ -520,7 +520,9 @@ impl Decode<'_> for TsUsbdInterfaceInfo {
             ));
         };
 
-        let mut src = ReadCursor::new(src.read_slice(usize::from(length) - 2));
+        let remaining_length = usize::from(length) - 2 /* Length */;
+        ensure_size!(in: src, size: remaining_length);
+        let mut src = ReadCursor::new(src.read_slice(remaining_length));
 
         let number_of_pipes_expected = src.read_u16();
         let interface_number = src.read_u8();

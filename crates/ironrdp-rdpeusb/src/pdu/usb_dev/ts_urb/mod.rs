@@ -77,9 +77,15 @@ pub enum TsUrb {
 
 impl TsUrb {
     pub(crate) fn decode(src: &mut ReadCursor<'_>, direction: TransferDirection) -> DecodeResult<Self> {
-        let ts_urb_size = src.read_u16(/* TS_URB_HEADER::Size */);
+        const ACTUAL_HEADER_SIZE: usize = 2 /* TS_URB_HEADER::Size */ + TsUrbHeader::FIXED_PART_SIZE;
 
-        let header = TsUrbHeader::decode(&mut ReadCursor::new(src.read_slice(TsUrbHeader::FIXED_PART_SIZE)))?;
+        ensure_size!(in: src, size: 2 /* TS_URB_HEADER::Size */ );
+        let ts_urb_size = usize::from(src.read_u16(/* TS_URB_HEADER::Size */));
+        if ts_urb_size < ACTUAL_HEADER_SIZE {
+            return Err(invalid_field_err!("TS_URB_HEADER::Size", "is smaller than 8"));
+        }
+
+        let header = TsUrbHeader::decode(src)?;
 
         if matches!(direction, TransferDirection::In) {
             if header.no_ack {
@@ -174,9 +180,9 @@ impl TsUrb {
             }
         }
 
-        let mut src = ReadCursor::new(
-            src.read_slice(usize::from(ts_urb_size) - size_of::<u16>(/* ts_urb_size */) - header.size()),
-        );
+        let payload_size = ts_urb_size - ACTUAL_HEADER_SIZE;
+        ensure_size!(in: src, size: payload_size);
+        let mut src = ReadCursor::new(src.read_slice(payload_size));
 
         let ts_urb = match header.func {
             UrbFunction::URB_FUNCTION_SELECT_CONFIGURATION => {
