@@ -221,6 +221,7 @@ impl IoControl {
         let input_buffer_size = src.read_u32().try_into().map_err(|e| other_err!(source: e))?;
         ensure_size!(in: src,
             size: input_buffer_size /* InputBuffer */ + 4 /* OutputBufferSize */ + 4 /* RequestId */);
+        // TODO: size limit
         let input_buffer = src.read_slice(input_buffer_size).to_vec();
         let output_buffer_size = src.read_u32();
         let req_id = src.read_u32();
@@ -797,6 +798,7 @@ impl TransferOutRequest {
 
         ensure_size!(in: src, size: 4 /* OutputBufferSize */);
         let output_buffer_size = src.read_u32().try_into().map_err(|e| other_err!(source: e))?;
+        // TODO: limit size
         let output_buffer = src.read_slice(output_buffer_size).to_vec();
 
         Ok(Self {
