@@ -8,8 +8,8 @@ use alloc::format;
 use alloc::vec::Vec;
 
 use ironrdp_core::{
-    DecodeError, DecodeOwned as _, DecodeResult, Encode, EncodeResult, ReadCursor, WriteCursor, ensure_fixed_part_size,
-    ensure_size, invalid_field_err, other_err, unsupported_value_err,
+    DecodeOwned as _, DecodeResult, Encode, EncodeResult, ReadCursor, WriteCursor, ensure_fixed_part_size, ensure_size,
+    invalid_field_err, other_err, unsupported_value_err,
 };
 use ironrdp_str::prefixed::Cch32String;
 
@@ -109,12 +109,15 @@ impl RegisterRequestCallback {
             0x0 => None,
             _ => {
                 ensure_size!(in: src, size: InterfaceId::FIXED_PART_SIZE);
-                let interface = InterfaceId::try_from(src.read_u32()).map_err(|source| {
-                    let e: DecodeError =
-                        invalid_field_err!("REGISTER_REQUEST_CALLBACK::RequestCompletion", "more than 30 bits");
-                    e.with_source(source)
-                })?;
-                Some(interface)
+                match src.read_u32() {
+                    0x0..=0x3 => {
+                        return Err(invalid_field_err!(
+                            "RequestCompletion",
+                            "conflict with default interfaces"
+                        ));
+                    }
+                    value => Some(InterfaceId::try_from(value)?),
+                }
             }
         };
         Ok(Self {
