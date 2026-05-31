@@ -503,7 +503,7 @@ impl Encode for InternalIoControl {
 pub struct QueryDeviceText {
     pub msg_id: MessageId,
     pub udev_iface: InterfaceId,
-    pub text_type: DeviceTextType,
+    pub text_type: u32,
     // TODO: Find out if MS-LCID and USB language ID's are same
     pub locale_id: u32,
 }
@@ -524,16 +524,7 @@ impl QueryDeviceText {
     pub(crate) fn decode(src: &mut ReadCursor<'_>, msg_id: MessageId, udev_iface: InterfaceId) -> DecodeResult<Self> {
         ensure_size!(in: src, size: Self::PAYLOAD_SIZE);
 
-        let text_type = match src.read_u32() {
-            0 => DeviceTextType::Description,
-            1 => DeviceTextType::LocationInformation,
-            value => {
-                return Err(unsupported_value_err!(
-                    "QUERY_DEVICE_TEXT::TextType",
-                    format!("{value}")
-                ));
-            }
-        };
+        let text_type = src.read_u32();
         let locale_id = src.read_u32();
 
         Ok(Self {
@@ -550,8 +541,7 @@ impl Encode for QueryDeviceText {
         ensure_fixed_part_size!(in: dst);
 
         self.header().encode(dst)?;
-        #[expect(clippy::as_conversions)]
-        dst.write_u32(self.text_type as u32);
+        dst.write_u32(self.text_type);
         dst.write_u32(self.locale_id);
 
         Ok(())
@@ -564,20 +554,6 @@ impl Encode for QueryDeviceText {
     fn size(&self) -> usize {
         Self::FIXED_PART_SIZE
     }
-}
-
-/// Indicates what kind of text/information is to be requested.
-#[repr(u32)]
-#[doc(alias = "DEVICE_TEXT_TYPE")]
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum DeviceTextType {
-    /// Basic description like manufacturer or product name.
-    #[doc(alias = "DeviceTextDescription")]
-    Description = 0x0,
-
-    /// Information such as where/what is the device connected to (bus or device number).
-    #[doc(alias = "DeviceTextLocationInformation")]
-    LocationInformation = 0x1,
 }
 
 /// [\[MS-RDPEUSB\] 2.2.6.6 Query Device Text Response Message (QUERY_DEVICE_TEXT_RSP)][1] message.

@@ -873,10 +873,8 @@ pub struct TsUrbIsochTransfer {
     pub pipe_handle: PipeHandle,
     pub transfer_flags: u32,
     pub start_frame: FrameNumber,
-    // /// Unused.
     pub error_count: u32,
-    // pub iso_packet: Vec<UsbdIsoPacketDesc>,
-    pub iso_packet_offsets: Vec<usize>,
+    pub iso_packet: Vec<UsbdIsoPacketDesc>,
 }
 
 impl TsUrbIsochTransfer {
@@ -888,15 +886,11 @@ impl TsUrbIsochTransfer {
         let start_frame = src.read_u32();
         let number_of_packets = src.read_u32();
         let error_count = src.read_u32();
-        // src.advance(4); // ErrorCount
 
         #[expect(clippy::map_with_unused_argument_over_ranges)]
-        let iso_packet_offsets = (0..number_of_packets)
-            .map(|_| {
-                UsbdIsoPacketDesc::decode(src)
-                    .and_then(|iso| usize::try_from(iso.offset).map_err(|e| other_err!(source: e)))
-            })
-            .collect::<Result<Vec<usize>, _>>()?;
+        let iso_packet = (0..number_of_packets)
+            .map(|_| UsbdIsoPacketDesc::decode(src))
+            .collect::<Result<Vec<UsbdIsoPacketDesc>, _>>()?;
 
         Ok(Self {
             header,
@@ -904,8 +898,7 @@ impl TsUrbIsochTransfer {
             transfer_flags,
             start_frame,
             error_count,
-            // iso_packet,
-            iso_packet_offsets,
+            iso_packet,
         })
     }
 }
@@ -928,37 +921,14 @@ impl Encode for TsUrbIsochTransfer {
         dst.write_u32(self.pipe_handle);
         dst.write_u32(self.transfer_flags);
         dst.write_u32(self.start_frame);
-        // dst.write_u32(self.iso_packet.len().try_into().map_err(|_| {
-        //     invalid_field_err!(
-        //         "TS_URB_ISOCH_TRANSFER::IsoPacket",
-        //         "too many packets: count exceeded field NumberOfPackets (4 bytes)"
-        //     )
-        // })?);
-        dst.write_u32(self.iso_packet_offsets.len().try_into().map_err(|_| {
+        dst.write_u32(self.iso_packet.len().try_into().map_err(|_| {
             invalid_field_err!(
                 "TS_URB_ISOCH_TRANSFER::IsoPacket",
                 "too many packets: count exceeded field NumberOfPackets (4 bytes)"
             )
         })?);
         dst.write_u32(self.error_count);
-        // self.iso_packet.iter().try_for_each(|packet| packet.encode(dst))?;
-        self.iso_packet_offsets.iter().try_for_each(|offset| {
-            u32::try_from(*offset)
-                .map_err(|e| other_err!(source: e))
-                .and_then(|offset| {
-                    UsbdIsoPacketDesc {
-                        offset,
-                        length: 0,
-                        status: 0,
-                    }
-                    .encode(dst)
-                })
-            // u32::try_from(*offset)
-            //     .map(|offset| dst.write_u32(offset))
-            //     .map_err(|e| other_err!(source: e))
-        })?;
-
-        Ok(())
+        self.iso_packet.iter().try_for_each(|packet| packet.encode(dst))
     }
 
     fn name(&self) -> &'static str {
@@ -975,8 +945,7 @@ impl Encode for TsUrbIsochTransfer {
                     + size_of::<u32>(/* NumberOfPackets */)
                     + size_of::<u32>(/* ErrorCount */)
             }
-            // + self.iso_packet.len() * UsbdIsoPacketDesc::FIXED_PART_SIZE
-            + self.iso_packet_offsets.len() * UsbdIsoPacketDesc::FIXED_PART_SIZE
+            + self.iso_packet.len() * UsbdIsoPacketDesc::FIXED_PART_SIZE
     }
 }
 
@@ -1466,10 +1435,11 @@ impl TsUrbOsFeatDescRequest {
 
         let recipient = src.read_u8() & 0x1F;
         let interface_number = src.read_u8();
+        // WDK requires MS_PageIndex to be 0; current Windows support is limited to 4 KiB.
         if src.read_u8(/* MS_PageIndex */) != 0 {
             return Err(invalid_field_err!(
                 "TRANSFER_IN_REQUEST::TsUrb: TS_URB_OS_FEATURE_DESCRIPTOR_REQUEST::MS_PageIndex",
-                "should be: 0x0"
+                "must be: 0x0"
             ));
         }
         let ms_feat_desc_index = src.read_u16();
