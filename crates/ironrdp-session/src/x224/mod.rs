@@ -1,5 +1,5 @@
 use ironrdp_core::{WriteBuf, decode};
-use ironrdp_dvc::{DrdynvcClient, DvcProcessor, DynamicVirtualChannel};
+use ironrdp_dvc::{DrdynvcClient, DvcClientProcessor, DynamicChannelRef};
 use ironrdp_pdu::mcs::{DisconnectProviderUltimatum, DisconnectReason, McsMessage, SendDataIndicationCtx};
 use ironrdp_pdu::rdp::autodetect::{AutoDetectReqPdu, AutoDetectRequest, AutoDetectResponse, AutoDetectRspPdu};
 use ironrdp_pdu::rdp::headers::ShareDataPdu;
