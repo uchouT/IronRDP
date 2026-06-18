@@ -114,11 +114,14 @@ impl Processor {
         process_svc_messages(messages.into(), channel_id, self.user_channel_id)
     }
 
-    pub fn get_dvc<T: DvcProcessor + 'static>(&self) -> Option<&DynamicVirtualChannel> {
-        self.get_svc_processor::<DrdynvcClient>()?.get_dvc_by_type_id::<T>()
+    pub fn get_dvc<T: DvcClientProcessor + 'static>(&self) -> Option<DynamicChannelRef<'_, T>> {
+        self.get_svc_processor::<DrdynvcClient>()?.get_dvc::<T>()
     }
 
-    pub fn get_dvc_by_channel_id(&self, channel_id: u32) -> Option<&DynamicVirtualChannel> {
+    pub fn get_dvc_by_channel_id<T: DvcClientProcessor + 'static>(
+        &self,
+        channel_id: u32,
+    ) -> Option<DynamicChannelRef<'_, T>> {
         self.get_svc_processor::<DrdynvcClient>()?
             .get_dvc_by_channel_id(channel_id)
     }
