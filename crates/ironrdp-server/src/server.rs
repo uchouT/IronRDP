@@ -43,7 +43,10 @@ use crate::encoder::{UpdateEncoder, UpdateEncoderCodecs};
 use crate::gfx::{EgfxServerMessage, GfxServerFactory};
 use crate::handler::RdpServerInputHandler;
 #[cfg(feature = "usb")]
-use crate::urbdrc::{DeviceFactory, UrbdrcServerMessage, UsbControlHandle, UsbDeviceHandle};
+use crate::urbdrc::{
+    DeviceFactory, SentIoRequest, ServerDeviceIoData, UrbdrcDeviceServerMessage, UrbdrcServerMessage, UsbControlHandle,
+    UsbDeviceHandle,
+};
 use crate::{SoundServerFactory, builder, capabilities};
 #[cfg(feature = "usb")]
 use ironrdp_rdpeusb::{InterfaceAlloc, server::UrbdrcControlServer, server::UrbdrcDeviceServer};
@@ -1247,7 +1250,10 @@ impl RdpServer {
                                 warn!("No drdynvc channel, dropping URBDRC request");
                                 continue;
                             };
-                            let dvc_reservation = drdynvc.reserve_channel();
+                            let Some(dvc_reservation) = drdynvc.reserve_channel() else {
+                                warn!("Run out of dynamic channel");
+                                continue;
+                            };
                             let Some(comp_iface) = usb_man.comp_iface_alloc.alloc() else {
                                 warn!("Run out of URBDRC interface IDs");
                                 continue;
@@ -1273,6 +1279,56 @@ impl RdpServer {
                             server_encode_svc_messages(vec![create_dvc_msg], drdynvc_channel_id, user_channel_id)?;
 
                         writer.write_all(&data).await?;
+                    }
+                    UrbdrcServerMessage::Device { dvc_id, dev_msg } => {
+                        let Some(drdynvc) = self.get_svc_processor::<dvc::DrdynvcServer>() else {
+                            warn!("No drdynvc channel, dropping URBDRC request");
+                            continue;
+                        };
+
+                        let Some(mut dvc) = drdynvc.dvc_by_id_mut::<UrbdrcDeviceServer>(dvc_id) else {
+                            warn!("channel id mismatch");
+                            continue;
+                        };
+                        let processor = dvc.processor_mut();
+
+                        let (request, io_result) = match dev_msg {
+                            UrbdrcDeviceServerMessage::QueryDeviceText { text_type, locale_id } => {
+                                (processor.query_device_text(text_type, locale_id)?, None)
+                            }
+                            UrbdrcDeviceServerMessage::Io { data, tx } => {
+                                let request = match data {
+                                    ServerDeviceIoData::IoControl(packet) => processor.io_control(packet),
+                                    ServerDeviceIoData::InternalIoControl(packet) => {
+                                        processor.internal_io_control(packet)
+                                    }
+                                    ServerDeviceIoData::TransferOut(packet) => processor.transfer_out(packet),
+                                    ServerDeviceIoData::TransferIn(packet) => processor.transfer_in(packet),
+                                }?;
+                                let sent = SentIoRequest {
+                                    request_id: request.request_id,
+                                    expects_completion: request.expects_completion,
+                                };
+
+                                (request.message, Some((tx, sent)))
+                            }
+                            UrbdrcDeviceServerMessage::Retract(reason) => (processor.retract_device(reason)?, None),
+                            UrbdrcDeviceServerMessage::CancelRequest(req_id) => {
+                                (processor.cancel_request(req_id)?, None)
+                            }
+                        };
+
+                        let messages = dvc::encode_dvc_messages(dvc_id, vec![request], ChannelFlags::SHOW_PROTOCOL)?;
+
+                        let drdynvc_channel_id = self
+                            .get_channel_id_by_type::<dvc::DrdynvcServer>()
+                            .context("DRDYNVC channel not found")?;
+
+                        let data = server_encode_svc_messages(messages, drdynvc_channel_id, user_channel_id)?;
+                        writer.write_all(&data).await?;
+                        if let Some((sender, req)) = io_result {
+                            let _ = sender.send(req);
+                        }
                     }
                 },
                 #[cfg(feature = "egfx")]

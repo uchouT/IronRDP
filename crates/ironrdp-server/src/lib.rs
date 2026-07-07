@@ -40,6 +40,8 @@ pub use server::{
     ServerEventSender, TransportTls,
 };
 pub use sound::{RdpsndServerHandler, RdpsndServerMessage, SoundServerFactory};
+#[cfg(feature = "usb")]
+pub use urbdrc::{DeviceFactory, UsbDeviceHandle};
 
 #[cfg(feature = "__bench")]
 pub mod bench {
