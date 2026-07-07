@@ -42,6 +42,33 @@ impl Drop for DynamicChannel {
     }
 }
 
+/// A reserved dynamic channel ID awaiting a channel processor.
+///
+/// Dropping this value without calling [`Self::create`] leaves the reserved ID unused.
+pub struct DynamicChannelReservation<'a> {
+    entry: alloc::collections::btree_map::VacantEntry<'a, u32, DynamicChannel>,
+}
+
+impl DynamicChannelReservation<'_> {
+    /// Returns the reserved dynamic channel ID.
+    pub fn channel_id(&self) -> u32 {
+        *self.entry.key()
+    }
+
+    /// Registers the channel and returns its DVC Create Request message.
+    pub fn create<T>(self, channel: T) -> PduResult<SvcMessage>
+    where
+        T: DvcServerProcessor + 'static,
+    {
+        let channel_name = channel.channel_name().into();
+        let channel_id = self.channel_id();
+        self.entry
+            .insert(DynamicChannel::new(channel, channel_id, ChannelState::Creation));
+        let req = DrdynvcServerPdu::Create(CreateRequestPdu::new(channel_id, channel_name));
+        as_svc_msg_with_flag(req)
+    }
+}
+
 struct DynamicChannelAllocator {
     dynamic_channels: BTreeMap<u32, DynamicChannel>,
     next_channel_id: u32,
@@ -85,6 +112,19 @@ impl DynamicChannelAllocator {
             .checked_add(1)
             .expect("dynamic channels reaches `u32::MAX`");
         channel_id
+    }
+
+    fn reserve_channel(&mut self) -> DynamicChannelReservation<'_> {
+        let channel_id = self.next_channel_id;
+        self.next_channel_id = self
+            .next_channel_id
+            .checked_add(1)
+            .expect("dynamic channels reaches `u32::MAX`");
+
+        let alloc::collections::btree_map::Entry::Vacant(entry) = self.dynamic_channels.entry(channel_id) else {
+            unreachable!("next dynamic channel ID must be vacant");
+        };
+        DynamicChannelReservation { entry }
     }
 
     fn get(&self, channel_id: u32) -> Option<&DynamicChannel> {
@@ -224,6 +264,16 @@ impl DrdynvcServer {
         let channel_id = self.dynamic_channels.insert_channel(channel, ChannelState::Creation);
         let req = DrdynvcServerPdu::Create(CreateRequestPdu::new(channel_id, channel_name));
         as_svc_msg_with_flag(req)
+    }
+
+    /// Reserves the next dynamic channel ID without creating the channel.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the dynamic channel ID space is exhausted.
+    #[must_use]
+    pub fn reserve_channel(&mut self) -> DynamicChannelReservation<'_> {
+        self.dynamic_channels.reserve_channel()
     }
 
     fn remove_by_channel_id(&mut self, id: u32) -> Option<DynamicChannel> {
