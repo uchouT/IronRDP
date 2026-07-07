@@ -20,6 +20,8 @@ mod handler;
 mod helper;
 mod server;
 mod sound;
+#[cfg(feature = "usb")]
+mod urbdrc;
 
 pub use clipboard::CliprdrServerFactory;
 pub use display::{
