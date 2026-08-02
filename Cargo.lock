@@ -3026,6 +3026,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ironrdp-usb"
+version = "0.1.0"
+
+[[package]]
 name = "ironrdp-viewer"
 version = "0.1.0"
 dependencies = [
