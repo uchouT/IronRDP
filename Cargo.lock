@@ -2878,6 +2878,7 @@ dependencies = [
  "ironrdp-dvc",
  "ironrdp-pdu",
  "ironrdp-str",
+ "ironrdp-usb",
 ]
 
 [[package]]
@@ -3037,6 +3038,7 @@ dependencies = [
  "ironrdp-session",
  "ironrdp-str",
  "ironrdp-svc",
+ "ironrdp-usb",
  "openh264",
  "paste",
  "png",
