@@ -2,9 +2,13 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const {
+  APIConnectionError, APIConnectionTimeoutError, APIUserAbortError,
+} = require("openai");
 
 const {
-  AgentFailure, TOOLS, executeTool, providerFailureDiagnostic, providerFailureReason, runAgent,
+  AgentFailure, TOOLS, compileOutputValidator, executeTool, providerFailureDiagnostic,
+  providerFailureReason, runAgent,
 } = require("../src/agent");
 
 const schema = {
@@ -221,11 +225,59 @@ test("runtime allows exactly one tools-disabled repair for JSON or schema failur
 
   await assert.rejects(
     runAgent({
-      client: clientFrom([message("not-json"), message('{"still":"invalid"}')]),
+      client: clientFrom([message('{"wrong":true}'), message("not-json")]),
       config: baseConfig, methodologies: [], prompt: "p", sandbox, schema,
     }),
-    (error) => error.reason === "repair response was invalid" && error.turnCount === 2,
+    (error) => error.reason ===
+      "repair response was invalid: response was not valid JSON" && error.turnCount === 2,
   );
+});
+
+test("runtime repairs a final response with no text", async () => {
+  const requests = [];
+  const result = await runAgent({
+    client: clientFrom([
+      message(null),
+      message('{"answer":"repaired"}'),
+    ], requests),
+    config: baseConfig,
+    methodologies: [],
+    prompt: "p",
+    sandbox,
+    schema,
+  });
+
+  assert.equal(result.output, '{"answer":"repaired"}');
+  assert.equal(result.turnCount, 2);
+  assert.equal(requests[1].tools, undefined);
+  assert.match(requests[1].messages.at(-1).content, /response was empty/);
+});
+
+test("runtime rejects malformed content without attempting repair", async () => {
+  const requests = [];
+  await assert.rejects(
+    runAgent({
+      client: clientFrom([message({ text: '{"answer":"invalid"}' })], requests),
+      config: baseConfig,
+      methodologies: [],
+      prompt: "p",
+      sandbox,
+      schema,
+    }),
+    (error) => error.reason === "provider response did not contain text",
+  );
+  assert.equal(requests.length, 1);
+});
+
+test("validation diagnostics do not expose model-provided property names", () => {
+  const validateOutput = compileOutputValidator({
+    type: "object",
+    patternProperties: { "^.+$": { type: "string" } },
+  });
+  const candidate = validateOutput('{"MODEL_RESPONSE_SECRET_SENTINEL":42}');
+  assert.equal(candidate.ok, false);
+  assert.match(candidate.reason, /^response did not match the schema: #\//);
+  assert.doesNotMatch(candidate.reason, /MODEL_RESPONSE_SECRET_SENTINEL/);
 });
 
 test("runtime repairs schema-valid output that exceeds the configured byte budget", async () => {
@@ -284,6 +336,26 @@ test("provider errors are reduced to fixed non-sensitive categories", () => {
   assert.equal(providerFailureReason({ status: 403, message: "secret" }), "provider access forbidden");
   assert.equal(providerFailureReason({ status: 429, message: "secret" }), "provider rate or quota limit reached");
   assert.equal(providerFailureReason({ status: 503, message: "secret" }), "provider service unavailable");
+  assert.equal(
+    providerFailureReason(new APIConnectionTimeoutError({ message: "secret" })),
+    "provider request timed out",
+  );
+  assert.equal(
+    providerFailureReason(new APIConnectionError({
+      message: "secret",
+      cause: new Error("nested secret"),
+    })),
+    "provider connection failed",
+  );
+  assert.equal(
+    providerFailureReason(new APIUserAbortError({ message: "secret" })),
+    "provider request failed",
+  );
+  class UnknownConnectionError extends APIConnectionError {}
+  assert.equal(
+    providerFailureReason(new UnknownConnectionError({ message: "secret" })),
+    "provider request failed",
+  );
   assert.equal(providerFailureReason(new Error("secret")), "provider request failed");
 });
 

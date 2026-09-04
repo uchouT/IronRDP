@@ -1,6 +1,7 @@
 "use strict";
 
 const Ajv = require("ajv");
+const { APIConnectionError, APIConnectionTimeoutError } = require("openai");
 
 const { ActionError, fail } = require("./errors");
 const { MAX_MODEL_OUTPUT_BYTES, MAX_TOOL_ARGUMENT_BYTES } = require("./limits");
@@ -74,6 +75,8 @@ function providerFailureReason(error) {
   if (status === 429) return "provider rate or quota limit reached";
   if (status >= 500 && status <= 599) return "provider service unavailable";
   if (status >= 400 && status <= 499) return "provider rejected the request";
+  if (error?.constructor === APIConnectionTimeoutError) return "provider request timed out";
+  if (error?.constructor === APIConnectionError) return "provider connection failed";
   return "provider request failed";
 }
 
@@ -116,7 +119,7 @@ function compileOutputValidator(schema, maximumBytes = MAX_MODEL_OUTPUT_BYTES) {
       const errors = (validate.errors || []).slice(0, 10)
         .map((error) => {
           const detail = error.keyword === "required" ? ` ${error.params.missingProperty}` : "";
-          return `${error.instancePath || "/"}: ${error.keyword}${detail}`;
+          return `${error.schemaPath || "/"}: ${error.keyword}${detail}`;
         })
         .join("; ");
       return { ok: false, reason: `response did not match the schema: ${errors}` };
@@ -226,7 +229,9 @@ async function runAgent({ client, config, methodologies, prompt, sandbox, schema
       throw new AgentFailure("repair response attempted a tool call", undefined, state);
     }
     const candidate = validateOutput(textContent(message.content));
-    if (!candidate.ok) throw new AgentFailure("repair response was invalid", undefined, state);
+    if (!candidate.ok) {
+      throw new AgentFailure(`repair response was invalid: ${candidate.reason}`, undefined, state);
+    }
     return result(candidate.output, state);
   }
 
@@ -269,6 +274,7 @@ function withState(error, state) {
 
 function textContent(content) {
   if (typeof content === "string") return content.trim();
+  if (content === null) return "";
   throw new AgentFailure("provider response did not contain text");
 }
 

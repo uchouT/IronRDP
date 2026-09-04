@@ -4,6 +4,13 @@ const { encodeCheckState } = require("./validate-classifier");
 const { provenancePrefix } = require("./validate-final-review");
 const { reviewPolicyEligible } = require("./routing");
 
+const SEVERITY_EMOJI = {
+  critical: ":purple_circle:",
+  high: ":red_circle:",
+  medium: ":orange_circle:",
+  low: ":yellow_circle:",
+};
+
 class StaleHeadError extends Error {
   constructor() { super("pull request head is no longer current"); this.name = "StaleHeadError"; }
 }
@@ -22,6 +29,11 @@ function escapeMarkdown(value) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/`/g, "&#96;")
     .replace(/@(?=[\w-])/g, "`@`").replace(/(?<!&)#(?=\d)/g, "`#`")
     .replace(/[[\]()!*_~|]/g, "\\$&");
+}
+
+function findingIndicator(finding) {
+  return `${finding.severity} ${SEVERITY_EMOJI[finding.severity]}` +
+    `${finding.question ? " :question:" : ""}`;
 }
 
 async function assertCurrentHead(github, owner, repo, prNumber, expectedSha) {
@@ -90,10 +102,11 @@ async function deleteMarkedComment(github, owner, repo, prNumber, expectedSha, b
 function reviewBody(marker, review) {
   const findings = review.findings.filter((finding) => finding.start_line === null).map((finding, index) => {
     return `${index + 1}. **${provenancePrefix(finding.sources)} ${escapeMarkdown(finding.title)}** — ` +
-      `${finding.classification} / ${finding.severity} — ${escapeMarkdown(finding.path)}\n` +
+      `${findingIndicator(finding)} — ${escapeMarkdown(finding.path)}\n` +
       `   ${escapeMarkdown(finding.rationale)}`;
   }).join("\n");
-  return `${marker}\n\n${escapeMarkdown(review.summary)}${findings ? `\n\n${findings}` : ""}`;
+  const clean = review.findings.length === 0 ? ":green_circle: " : "";
+  return `${marker}\n\n${clean}${escapeMarkdown(review.summary)}${findings ? `\n\n${findings}` : ""}`;
 }
 
 async function reviews(github, owner, repo, prNumber) {
@@ -125,7 +138,7 @@ async function publishReview(github, owner, repo, prNumber, state, botLogin, com
     const comment = {
       path: finding.path, line: finding.end_line, side: "RIGHT",
       body: `**${provenancePrefix(finding.sources)} ${escapeMarkdown(finding.title)}** — ` +
-        `${finding.classification} / ${finding.severity}: ${escapeMarkdown(finding.rationale)}`,
+        `${findingIndicator(finding)} — ${escapeMarkdown(finding.rationale)}`,
     };
     if (finding.start_line !== finding.end_line) {
       comment.start_line = finding.start_line;
@@ -234,7 +247,7 @@ async function applyLabels(github, owner, repo, prNumber, state, currentLabels) 
   return true;
 }
 
-async function writeState({ github, owner, repo, prNumber, state, botLogin }) {
+async function writeState({ github, owner, repo, prNumber, state, botLogin, reviewRequested = false }) {
   if (!state?.ok || !["classification", "review"].includes(state.mode) ||
       typeof state.expectedSha !== "string" || !Number.isSafeInteger(prNumber) || prNumber <= 0) {
     throw new Error("invalid normalized state");
@@ -269,8 +282,10 @@ async function writeState({ github, owner, repo, prNumber, state, botLogin }) {
       await deleteMarkedComment(github, owner, repo, prNumber, state.expectedSha, botLogin, marker);
     }
     if (state.check) {
-      const created = await ensureClassificationCheck(github, owner, repo, prNumber, state.expectedSha, state.check);
-      if (created && state.check.title === "Classification complete" && state.dispatchReview !== false) {
+      const changed = await ensureClassificationCheck(
+        github, owner, repo, prNumber, state.expectedSha, state.check);
+      if ((changed || reviewRequested) && state.check.title === "Classification complete" &&
+          state.dispatchReview !== false) {
         await dispatchClassificationComplete(github, owner, repo, prNumber, state.expectedSha);
       }
     }
